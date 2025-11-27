@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tetris Tangram Solver</title>
+<style>
+    body { font-family: Arial; display: flex; gap: 20px; padding: 20px;}
+    #grid, .solutionGrid { border-collapse: collapse; }
+    #grid td, .solutionGrid td {
+        width: 25px; height: 25px;
+        border: 1px solid #ccc;
+        text-align: center;
+        font-size: 14px;
+        font-weight: bold;
+    }
+    .filled { background: #444; }
+
+    /* Solution colors */
+    .c1 { background: #ffe066; }  /* single */
+    .cL { background: #f25f5c; }  /* L */
+    .cS { background: #70c1b3; }  /* S */
+    .cT { background: #247ba0; }  /* T */
+    .cI { background: #50514f; color:white;} /* I */
+
+    #results { white-space: pre; background:#f4f4f4; padding:10px; margin-top:10px; max-height:400px; overflow:auto;}
+    #solutionVisual { margin-top: 20px; }
+</style>
+</head>
+<body>
+
+<div>
+    <h2>Grid Size</h2>
+    <label>Rows: <input id="rows" type="number" value="6" min="2"></label><br>
+    <label>Cols: <input id="cols" type="number" value="6" min="2"></label><br>
+    <button onclick="buildGrid()">Create Grid</button>
+
+    <h3>Piece Counts</h3>
+    <div>1×1 cubes: <input id="p1" type="number" value="10"></div>
+    <div>L pieces: <input id="pL" type="number" value="10"></div>
+    <div>S pieces: <input id="pS" type="number" value="10"></div>
+    <div>T pieces: <input id="pT" type="number" value="10"></div>
+    <div>I pieces: <input id="pI" type="number" value="10"></div>
+
+    <button onclick="solve('least')">Solve (Least Blocks)</button>
+    <button onclick="solve('priority')">Solve (Use Most Abundant)</button>
+</div>
+
+<div>
+    <h2>Grid</h2>
+    <table id="grid"></table>
+
+    <h2>Results</h2>
+    <div id="results"></div>
+
+    <h2>Visual Solution</h2>
+    <div id="solutionVisual"></div>
+</div>
+
+<script>
+// ========================================================================================
+// Shape defs + rotations
+// ========================================================================================
+
+const SHAPES_BASE = {
+    "1": [[[0,0]]],
+    "L": [[[0,0],[1,0],[1,1]]],
+    "S": [[[0,1],[0,2],[1,0],[1,1]]],
+    "T": [[[0,1],[1,0],[1,1],[1,2]]],
+    "I": [[[0,0],[0,1],[0,2],[0,3]]]
+};
+
+function rotate(shape) {
+    return shape.map(([r,c]) => [c, -r]);
+}
+function normalize(shape) {
+    const minR = Math.min(...shape.map(x=>x[0]));
+    const minC = Math.min(...shape.map(x=>x[1]));
+    return shape.map(([r,c]) => [r-minR, c-minC]);
+}
+function generateRotations(baseShapes) {
+    let all = {};
+    for (let k in baseShapes) {
+        let variations = new Set();
+        baseShapes[k].forEach(shape => {
+            let current = shape;
+            for (let i=0;i<4;i++) {
+                current = normalize(current);
+                variations.add(JSON.stringify(current));
+                current = rotate(current);
+            }
+        });
+        all[k] = [...variations].map(v=>JSON.parse(v));
+    }
+    return all;
+}
+const SHAPES = generateRotations(SHAPES_BASE);
+
+// ========================================================================================
+// Build grid
+// ========================================================================================
+
+let grid = [];
+let rows = 0, cols = 0;
+
+function buildGrid() {
+    rows = parseInt(rowsInput.value);
+    cols = parseInt(colsInput.value);
+
+    const table = document.getElementById("grid");
+    table.innerHTML = "";
+    grid = Array.from({length: rows}, () => Array(cols).fill(0));
+
+    for (let r=0;r<rows;r++) {
+        let tr = document.createElement("tr");
+        for (let c=0;c<cols;c++) {
+            let td = document.createElement("td");
+            td.onclick = () => {
+                grid[r][c] = grid[r][c] ? 0 : 1;
+                td.classList.toggle("filled");
+            };
+            tr.appendChild(td);
+        }
+        table.appendChild(tr);
+    }
+}
+
+const rowsInput = document.getElementById("rows");
+const colsInput = document.getElementById("cols");
+
+// ========================================================================================
+// Solver
+// ========================================================================================
+
+function solve(mode) {
+    const pieceCounts = {
+        "1": parseInt(p1.value),
+        "L": parseInt(pL.value),
+        "S": parseInt(pS.value),
+        "T": parseInt(pT.value),
+        "I": parseInt(pI.value)
+    };
+
+    let order = Object.keys(pieceCounts);
+
+    if (mode === "priority") {
+        order.sort((a,b)=>pieceCounts[b]-pieceCounts[a]);
+    } else {
+        const area = {"1":1,"L":3,"S":4,"T":4,"I":4};
+        order.sort((a,b)=>area[a]-area[b]);
+    }
+
+    let gridCopy = grid.map(row=>row.slice());
+
+    function findEmpty() {
+        for (let r=0;r<rows;r++)
+            for (let c=0;c<cols;c++)
+                if (gridCopy[r][c] === 0) return [r,c];
+        return null;
+    }
+
+    function placeable(shape,r0,c0) {
+        for (let [dr,dc] of shape) {
+            let r=r0+dr, c=c0+dc;
+            if (r<0||c<0||r>=rows||c>=cols) return false;
+            if (gridCopy[r][c] !== 0) return false;
+        }
+        return true;
+    }
+
+    function place(shape,r0,c0,val) {
+        for (let [dr,dc] of shape) gridCopy[r0+dr][c0+dc] = val;
+    }
+
+    let best=null;
+    let bestCount=Infinity;
+
+    function backtrack(countUsed) {
+        if (countUsed >= bestCount) return;
+
+        let pos = findEmpty();
+        if (!pos) {
+            best = gridCopy.map(r=>r.slice());
+            bestCount = countUsed;
+            return;
+        }
+
+        let [r,c] = pos;
+
+        for (let key of order) {
+            if (pieceCounts[key] <= 0) continue;
+            for (let shape of SHAPES[key]) {
+
+                if (placeable(shape,r,c)) {
+                    place(shape,r,c,key);
+                    pieceCounts[key]--;
+                    backtrack(countUsed+1);
+                    pieceCounts[key]++;
+                    place(shape,r,c,0);
+                }
+            }
+        }
+    }
+
+    backtrack(0);
+
+    const results = document.getElementById("results");
+    const solutionVisual = document.getElementById("solutionVisual");
+
+    if (!best) {
+        results.textContent = "No solution found.";
+        solutionVisual.innerHTML = "";
+        return;
+    }
+
+    // ----- Text output -----
+    let txt = "Solution:\n";
+    best.forEach(row=>{
+        txt += row.map(x=>x===0?".":x).join(" ") + "\n";
+    });
+    results.textContent = txt;
+
+    // ----- VISUAL GRID -----
+    solutionVisual.innerHTML = "";
+    const table = document.createElement("table");
+    table.className = "solutionGrid";
+
+    for (let r=0;r<rows;r++) {
+        let tr = document.createElement("tr");
+        for (let c=0;c<cols;c++) {
+            let td = document.createElement("td");
+            let val = best[r][c];
+
+            if (val === 1) {
+                td.classList.add("filled");
+            } else if (val !== 0) {
+                td.classList.add("c"+val);
+                td.textContent = val;
+            }
+
+            tr.appendChild(td);
+        }
+        table.appendChild(tr);
+    }
+
+    solutionVisual.appendChild(table);
+}
+
+buildGrid();
+</script>
+
+</body>
+</html>
