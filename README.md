@@ -21,3 +21,13 @@ After selecting how many of each piece you have and configuring the grid’s sta
 
 **Solve (Use Most Abundant) - Recommended:**
   Prioritizes using whichever pieces you have the most of. For example, if you have 15 S-shaped pieces and only 3 of every other piece, this option will try to use the S pieces first.
+
+
+
+## Improvements
+This update adds:
+- Web Worker-based solving for smoother performance
+- Progress tracking UI
+- Stop button
+- Timeout protection
+- Enhanced piece visuals and highlighting
